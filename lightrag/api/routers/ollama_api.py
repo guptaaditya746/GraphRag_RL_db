@@ -22,6 +22,7 @@ class SearchMode(str, Enum):
     hybrid = "hybrid"
     mix = "mix"
     bypass = "bypass"
+    cypher = "cypher"
     context = "context"
 
 
@@ -197,6 +198,7 @@ def parse_query_mode(query: str) -> tuple[str, SearchMode, bool, Optional[str]]:
         "/hybrid ": (SearchMode.hybrid, False),
         "/mix ": (SearchMode.mix, False),
         "/bypass ": (SearchMode.bypass, False),
+        "/cypher ": (SearchMode.cypher, False),
         "/context": (
             SearchMode.mix,
             True,
@@ -206,6 +208,7 @@ def parse_query_mode(query: str) -> tuple[str, SearchMode, bool, Optional[str]]:
         "/hybridcontext": (SearchMode.hybrid, True),
         "/naivecontext": (SearchMode.naive, True),
         "/mixcontext": (SearchMode.mix, True),
+        "/cyphercontext": (SearchMode.cypher, True),
     }
 
     for prefix, (mode, only_need_context) in mode_map.items():

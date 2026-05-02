@@ -407,7 +407,8 @@
         "global": "Global",
         "hybrid": "Hybrid",
         "mix": "Mix",
-        "bypass": "Bypass"
+        "bypass": "Bypass",
+        "cypher": "Cypher"
       },
       "responseFormat": "Định Dạng Phản Hồi",
       "responseFormatTooltip": "Xác định định dạng phản hồi. Ví dụ:\n• Nhiều Đoạn Văn\n• Một Đoạn Văn\n• Danh Sách Điểm",

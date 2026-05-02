@@ -407,7 +407,8 @@
         "global": "Global",
         "hybrid": "Hybrid",
         "mix": "Mix",
-        "bypass": "Bypass"
+        "bypass": "Bypass",
+        "cypher": "Cypher"
       },
       "responseFormat": "Формат відповіді",
       "responseFormatTooltip": "Визначає формат відповіді. Приклади:\n• Кілька абзаців\n• Один абзац\n• Маркований список",

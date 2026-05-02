@@ -85,13 +85,17 @@ T = TypeVar("T")
 class QueryParam:
     """Configuration parameters for query execution in LightRAG."""
 
-    mode: Literal["local", "global", "hybrid", "naive", "mix", "bypass"] = "mix"
+    mode: Literal[
+        "local", "global", "hybrid", "naive", "mix", "bypass", "cypher"
+    ] = "mix"
     """Specifies the retrieval mode:
     - "local": Focuses on context-dependent information.
     - "global": Utilizes global knowledge.
     - "hybrid": Combines local and global retrieval methods.
     - "naive": Performs a basic search without advanced techniques.
     - "mix": Integrates knowledge graph and vector retrieval.
+    - "bypass": Sends the request directly to the configured LLM.
+    - "cypher": Retrieves KG context, generates a safe read-only Neo4j Cypher query, and executes it.
     """
 
     only_need_context: bool = False
@@ -747,6 +751,22 @@ class BaseGraphStorage(StorageNameSpace, ABC):
         Returns:
             List of matching labels sorted by relevance
         """
+
+    async def execute_cypher(
+        self,
+        cypher: str,
+        params: dict[str, object] | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        """Execute a validated read-only Cypher query.
+
+        Storage backends that do not support native Cypher execution should leave
+        this default implementation in place. Callers can catch
+        ``NotImplementedError`` and report a storage-specific compatibility error.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support Cypher execution."
+        )
 
 
 class DocStatus(str, Enum):

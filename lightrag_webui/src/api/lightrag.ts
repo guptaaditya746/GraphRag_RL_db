@@ -94,8 +94,9 @@ export type LightragDocumentsScanProgress = {
  * - "hybrid": Combines local and global retrieval methods.
  * - "mix": Integrates knowledge graph and vector retrieval.
  * - "bypass": Bypasses knowledge retrieval and directly uses the LLM.
+ * - "cypher": Generates and executes a safe read-only Neo4j Cypher query.
  */
-export type QueryMode = 'naive' | 'local' | 'global' | 'hybrid' | 'mix' | 'bypass'
+export type QueryMode = 'naive' | 'local' | 'global' | 'hybrid' | 'mix' | 'bypass' | 'cypher'
 
 export type Message = {
   role: 'user' | 'assistant' | 'system'
@@ -142,6 +143,9 @@ export type QueryRequest = {
 
 export type QueryResponse = {
   response: string
+  cypher_query?: string
+  results?: Array<Record<string, any>>
+  references?: Array<Record<string, any>> | null
 }
 
 export type EntityUpdateResponse = {

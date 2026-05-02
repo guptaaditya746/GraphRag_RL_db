@@ -1,10 +1,12 @@
 from __future__ import annotations
 from functools import partial
 from pathlib import Path
+from dataclasses import replace
 
 import asyncio
 import json
 import json_repair
+import re
 from typing import Any, AsyncIterator, overload, Literal
 from collections import Counter, defaultdict
 
@@ -3159,6 +3161,273 @@ async def extract_entities(
     # If all tasks completed successfully, chunk_results already contains the results
     # Return the chunk_results for later processing in merge_nodes_and_edges
     return chunk_results
+
+
+_CYPHER_FENCE_PATTERN = re.compile(
+    r"```(?:\s*cypher)?\s*(.*?)```", re.IGNORECASE | re.DOTALL
+)
+_CYPHER_START_PATTERN = re.compile(
+    r"^\s*(OPTIONAL\s+MATCH|MATCH|WITH)\b", re.IGNORECASE
+)
+_CYPHER_MATCH_PATTERN = re.compile(r"\bMATCH\b", re.IGNORECASE)
+_CYPHER_FORBIDDEN_PATTERN = re.compile(
+    r"\b(?:CREATE|MERGE|SET|DELETE|DETACH|REMOVE|DROP|FOREACH|INSERT)\b"
+    r"|LOAD\s+CSV"
+    r"|CALL\b"
+    r"|dbms\."
+    r"|apoc\.(?:load|periodic)",
+    re.IGNORECASE,
+)
+_CYPHER_LIMIT_PATTERN = re.compile(r"\bLIMIT\s+(?:\d+|\$\w+)\s*$", re.IGNORECASE)
+_CYPHER_COUNT_PATTERN = re.compile(
+    r"\bRETURN\s+count\s*\([^)]*\)(?:\s+AS\s+`?[\w]+`?)?\s*$",
+    re.IGNORECASE,
+)
+_CYPHER_CLAUSE_PATTERN = re.compile(
+    r"\b(?:OPTIONAL\s+MATCH|MATCH|WITH)\b", re.IGNORECASE
+)
+
+
+def extract_cypher(llm_output: str) -> str:
+    """Extract a Cypher statement from raw LLM output."""
+
+    cleaned_output = remove_think_tags(llm_output or "").strip()
+    if not cleaned_output:
+        raise ValueError("Generated Cypher output is empty.")
+
+    fenced_match = _CYPHER_FENCE_PATTERN.search(cleaned_output)
+    if fenced_match:
+        cleaned_output = fenced_match.group(1).strip()
+
+    cleaned_output = re.sub(r"^\s*cypher\s*", "", cleaned_output, count=1, flags=re.I)
+
+    clause_match = _CYPHER_CLAUSE_PATTERN.search(cleaned_output)
+    if clause_match and clause_match.start() > 0:
+        cleaned_output = cleaned_output[clause_match.start() :].strip()
+
+    cleaned_output = cleaned_output.strip()
+    if not cleaned_output:
+        raise ValueError("Generated Cypher output is empty.")
+
+    return cleaned_output
+
+
+def validate_readonly_cypher(cypher: str) -> None:
+    """Validate that Cypher is a single safe read-only query."""
+
+    normalized = cypher.strip()
+    if not normalized:
+        raise ValueError("Generated Cypher query is empty.")
+
+    if normalized.endswith(";"):
+        normalized = normalized[:-1].strip()
+
+    if not normalized:
+        raise ValueError("Generated Cypher query is empty.")
+
+    if ";" in normalized:
+        raise ValueError("Multiple Cypher statements are not allowed.")
+
+    if not _CYPHER_START_PATTERN.match(normalized):
+        raise ValueError(
+            "Cypher query must start with MATCH, OPTIONAL MATCH, or WITH."
+        )
+
+    if not _CYPHER_MATCH_PATTERN.search(normalized):
+        raise ValueError("Cypher query must include a MATCH clause.")
+
+    if _CYPHER_FORBIDDEN_PATTERN.search(normalized):
+        raise ValueError("Only read-only Cypher queries are allowed.")
+
+
+def _is_pure_count_query(cypher: str) -> bool:
+    normalized = cypher.strip().rstrip(";").strip()
+    return bool(_CYPHER_COUNT_PATTERN.search(normalized))
+
+
+def ensure_limit(cypher: str, limit: int) -> str:
+    """Ensure a bounded LIMIT clause is present for non-count queries."""
+
+    normalized = cypher.strip().rstrip(";").strip()
+    if not normalized:
+        raise ValueError("Generated Cypher query is empty.")
+
+    if _is_pure_count_query(normalized):
+        return normalized
+
+    if _CYPHER_LIMIT_PATTERN.search(normalized):
+        return normalized
+
+    bounded_limit = max(1, min(limit, 100))
+    return f"{normalized}\nLIMIT {bounded_limit}"
+
+
+def _build_cypher_failure_result(message: str) -> QueryResult:
+    return QueryResult(
+        content=message,
+        raw_data={
+            "status": "failure",
+            "message": message,
+            "data": {},
+            "metadata": {"query_mode": "cypher"},
+        },
+    )
+
+
+async def cypher_query(
+    query: str,
+    knowledge_graph_inst: BaseGraphStorage,
+    entities_vdb: BaseVectorStorage,
+    relationships_vdb: BaseVectorStorage,
+    text_chunks_db: BaseKVStorage,
+    query_param: QueryParam,
+    global_config: dict[str, str],
+    hashing_kv: BaseKVStorage | None = None,
+    system_prompt: str | None = None,
+    chunks_vdb: BaseVectorStorage = None,
+) -> QueryResult | None:
+    """Generate, validate, execute, and optionally explain a read-only Cypher query."""
+
+    if not query:
+        return QueryResult(content=PROMPTS["fail_response"])
+
+    if query_param.model_func:
+        use_model_func = query_param.model_func
+    else:
+        use_model_func = global_config["llm_model_func"]
+        use_model_func = partial(use_model_func, _priority=5)
+
+    cypher_limit = max(1, min(query_param.top_k or 1, 100))
+    context_param = replace(
+        query_param,
+        mode="mix",
+        only_need_context=True,
+        only_need_prompt=False,
+        stream=False,
+    )
+
+    context_query_result = await kg_query(
+        query=query,
+        knowledge_graph_inst=knowledge_graph_inst,
+        entities_vdb=entities_vdb,
+        relationships_vdb=relationships_vdb,
+        text_chunks_db=text_chunks_db,
+        query_param=context_param,
+        global_config=global_config,
+        hashing_kv=hashing_kv,
+        system_prompt=None,
+        chunks_vdb=chunks_vdb,
+    )
+
+    if context_query_result is None or not context_query_result.content:
+        return _build_cypher_failure_result(
+            "Unable to build retrieval context for Cypher mode."
+        )
+
+    context_data = context_query_result.content
+    context_raw_data = context_query_result.raw_data or {}
+    generation_prompt_template = (
+        system_prompt if system_prompt else PROMPTS["cypher_query_generation"]
+    )
+    generation_prompt = generation_prompt_template.format(
+        context_data=context_data,
+        user_query=query,
+        cypher_limit=cypher_limit,
+    )
+
+    if query_param.only_need_prompt:
+        prompt_content = "\n\n".join(
+            [generation_prompt, "---User Query---", query]
+        )
+        return QueryResult(content=prompt_content, raw_data=context_raw_data)
+
+    try:
+        cypher_llm_output = await use_model_func(
+            query,
+            system_prompt=generation_prompt,
+            history_messages=query_param.conversation_history,
+            enable_cot=False,
+            stream=False,
+        )
+
+        if not isinstance(cypher_llm_output, str):
+            return _build_cypher_failure_result(
+                "Cypher generation returned an unexpected response type."
+            )
+
+        cypher = ensure_limit(
+            extract_cypher(cypher_llm_output),
+            cypher_limit,
+        )
+        validate_readonly_cypher(cypher)
+    except Exception as exc:
+        logger.error(f"[cypher_query] Failed to generate valid Cypher: {exc}")
+        return _build_cypher_failure_result(
+            f"Failed to generate a safe read-only Cypher query: {exc}"
+        )
+
+    try:
+        rows = await knowledge_graph_inst.execute_cypher(
+            cypher,
+            params=None,
+            limit=cypher_limit,
+        )
+    except (AttributeError, NotImplementedError):
+        return _build_cypher_failure_result(
+            "Cypher mode is only supported when the configured graph storage is Neo4j."
+        )
+    except Exception as exc:
+        logger.error(f"[cypher_query] Failed to execute Cypher: {exc}")
+        return _build_cypher_failure_result(f"Failed to execute Cypher query: {exc}")
+
+    response_text = ""
+    if not query_param.only_need_context:
+        response_prompt = PROMPTS["cypher_response"].format(
+            user_query=query,
+            cypher_query=cypher,
+            cypher_results=json.dumps(rows, ensure_ascii=False, indent=2),
+        )
+        try:
+            response_output = await use_model_func(
+                query,
+                system_prompt=response_prompt,
+                history_messages=query_param.conversation_history,
+                enable_cot=False,
+                stream=False,
+            )
+            if isinstance(response_output, str):
+                response_text = remove_think_tags(response_output).strip()
+        except Exception as exc:
+            logger.warning(f"[cypher_query] Failed to generate response text: {exc}")
+
+    context_metadata = context_raw_data.get("metadata", {})
+    metadata = {
+        key: value for key, value in context_metadata.items() if key != "query_mode"
+    }
+    metadata.update(
+        {
+            "query_mode": "cypher",
+            "retrieval_mode": context_metadata.get("query_mode", "mix"),
+            "result_count": len(rows),
+        }
+    )
+
+    data: dict[str, Any] = {
+        "cypher_query": cypher,
+        "results": rows,
+    }
+    if response_text:
+        data["response"] = response_text
+
+    return QueryResult(
+        content=response_text,
+        raw_data={
+            "status": "success",
+            "message": "Cypher query executed successfully",
+            "data": data,
+            "metadata": metadata,
+        },
+    )
 
 
 async def kg_query(

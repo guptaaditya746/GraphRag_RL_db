@@ -1,7 +1,7 @@
 import os
 import re
 from dataclasses import dataclass
-from typing import final
+from typing import Any, final
 import configparser
 
 
@@ -28,6 +28,7 @@ from neo4j import (  # type: ignore
     AsyncDriver,
     AsyncManagedTransaction,
 )
+from neo4j.graph import Node, Path, Relationship  # type: ignore
 
 from dotenv import load_dotenv
 
@@ -135,8 +136,10 @@ class Neo4JStorage(BaseGraphStorage):
     async def initialize(self):
         async with get_data_init_lock():
             URI = os.environ.get("NEO4J_URI", config.get("neo4j", "uri", fallback=None))
-            USERNAME = os.environ.get(
-                "NEO4J_USERNAME", config.get("neo4j", "username", fallback=None)
+            USERNAME = (
+                os.environ.get("NEO4J_USERNAME")
+                or os.environ.get("NEO4J_USER")
+                or config.get("neo4j", "username", fallback=None)
             )
             PASSWORD = os.environ.get(
                 "NEO4J_PASSWORD", config.get("neo4j", "password", fallback=None)
@@ -1986,6 +1989,89 @@ class Neo4JStorage(BaseGraphStorage):
                     f"[{self.workspace}] Fallback search ({'Chinese' if is_chinese else 'Latin'}) for '{query}' returned {len(labels)} results (limit: {limit})"
                 )
                 return labels
+
+    def _serialize_cypher_value(self, value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+
+        if isinstance(value, Node):
+            return {
+                "element_id": value.element_id,
+                "labels": sorted(value.labels),
+                "properties": {
+                    key: self._serialize_cypher_value(item)
+                    for key, item in dict(value).items()
+                },
+            }
+
+        if isinstance(value, Relationship):
+            return {
+                "element_id": value.element_id,
+                "type": value.type,
+                "start_node_element_id": value.start_node.element_id,
+                "end_node_element_id": value.end_node.element_id,
+                "start_node_id": value.start_node.get("entity_id"),
+                "end_node_id": value.end_node.get("entity_id"),
+                "properties": {
+                    key: self._serialize_cypher_value(item)
+                    for key, item in dict(value).items()
+                },
+            }
+
+        if isinstance(value, Path):
+            return {
+                "nodes": [self._serialize_cypher_value(node) for node in value.nodes],
+                "relationships": [
+                    self._serialize_cypher_value(rel) for rel in value.relationships
+                ],
+                "length": len(value.relationships),
+            }
+
+        if isinstance(value, dict):
+            return {
+                str(key): self._serialize_cypher_value(item)
+                for key, item in value.items()
+            }
+
+        if isinstance(value, (list, tuple, set)):
+            return [self._serialize_cypher_value(item) for item in value]
+
+        if hasattr(value, "iso_format"):
+            return value.iso_format()
+
+        if hasattr(value, "isoformat"):
+            return value.isoformat()
+
+        return str(value)
+
+    @READ_RETRY
+    async def execute_cypher(
+        self,
+        cypher: str,
+        params: dict[str, object] | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        bounded_limit = max(1, limit)
+        async with self._driver.session(
+            database=self._DATABASE, default_access_mode="READ"
+        ) as session:
+            result = None
+            try:
+                result = await session.run(cypher, parameters=params or {})
+                rows: list[dict[str, object]] = []
+                async for record in result:
+                    row = {
+                        key: self._serialize_cypher_value(record[key])
+                        for key in record.keys()
+                    }
+                    rows.append(row)
+                    if len(rows) >= bounded_limit:
+                        break
+
+                return rows
+            finally:
+                if result is not None:
+                    await result.consume()
 
     async def drop(self) -> dict[str, str]:
         """Drop all data from current workspace storage and clean up resources

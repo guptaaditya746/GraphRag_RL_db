@@ -407,7 +407,8 @@
         "global": "Global",
         "hybrid": "Hybrid",
         "mix": "Mix",
-        "bypass": "Bypass"
+        "bypass": "Bypass",
+        "cypher": "Cypher"
       },
       "responseFormat": "Antwortformat",
       "responseFormatTooltip": "Definiert das Antwortformat. Beispiele:\n• Mehrere Absätze\n• Einzelner Absatz\n• Aufzählungspunkte",

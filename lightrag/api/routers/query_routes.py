@@ -19,7 +19,9 @@ class QueryRequest(BaseModel):
         description="The query text",
     )
 
-    mode: Literal["local", "global", "hybrid", "naive", "mix", "bypass"] = Field(
+    mode: Literal[
+        "local", "global", "hybrid", "naive", "mix", "bypass", "cypher"
+    ] = Field(
         default="mix",
         description="Query mode",
     )
@@ -161,6 +163,14 @@ class QueryResponse(BaseModel):
     references: Optional[List[ReferenceItem]] = Field(
         default=None,
         description="Reference list (Disabled when include_references=False, /query/data always includes references.)",
+    )
+    cypher_query: Optional[str] = Field(
+        default=None,
+        description="Generated Cypher query when mode='cypher'.",
+    )
+    results: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Executed Cypher result rows when mode='cypher'.",
     )
 
 
@@ -336,6 +346,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
         - **naive**: Simple vector similarity search without knowledge graph
         - **mix**: Integrates knowledge graph retrieval with vector search (recommended)
         - **bypass**: Direct LLM query without knowledge retrieval
+        - **cypher**: Generates and executes a safe read-only Neo4j Cypher query
 
         conversation_history parameteris sent to LLM only, does not affect retrieval results.
 
@@ -395,6 +406,8 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             QueryResponse: JSON response containing:
                 - **response**: The generated answer to your query
                 - **references**: Source citations (if include_references=True)
+                - **cypher_query**: Generated Cypher query when mode is "cypher"
+                - **results**: Executed Cypher rows when mode is "cypher"
 
         Raises:
             HTTPException:
@@ -419,7 +432,14 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             # Get the non-streaming response content
             response_content = llm_response.get("content", "")
             if not response_content:
-                response_content = "No relevant context found for the query."
+                response_content = (
+                    data.get("response")
+                    or result.get("message")
+                    or "No relevant context found for the query."
+                )
+
+            cypher_query = data.get("cypher_query")
+            cypher_results = data.get("results")
 
             # Enrich references with chunk content if requested
             if request.include_references and request.include_chunk_content:
@@ -446,9 +466,19 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
 
             # Return response with or without references based on request
             if request.include_references:
-                return QueryResponse(response=response_content, references=references)
+                return QueryResponse(
+                    response=response_content,
+                    references=references,
+                    cypher_query=cypher_query,
+                    results=cypher_results,
+                )
             else:
-                return QueryResponse(response=response_content, references=None)
+                return QueryResponse(
+                    response=response_content,
+                    references=None,
+                    cypher_query=cypher_query,
+                    results=cypher_results,
+                )
         except Exception as e:
             logger.error(f"Error processing query: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
@@ -561,6 +591,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
         - **naive**: Vector similarity search only
         - **mix**: Integrated knowledge graph + vector retrieval (recommended)
         - **bypass**: Direct LLM query without knowledge retrieval
+        - **cypher**: Generates and executes a safe read-only Neo4j Cypher query
 
         conversation_history parameteris sent to LLM only, does not affect retrieval results.
 
@@ -714,14 +745,23 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
                             yield f"{json.dumps({'error': str(e)})}\n"
                 else:
                     # Non-streaming mode: send complete response in one message
+                    data = result.get("data", {})
                     response_content = llm_response.get("content", "")
                     if not response_content:
-                        response_content = "No relevant context found for the query."
+                        response_content = (
+                            data.get("response")
+                            or result.get("message")
+                            or "No relevant context found for the query."
+                        )
 
                     # Create complete response object
                     complete_response = {"response": response_content}
                     if request.include_references:
                         complete_response["references"] = references
+                    if "cypher_query" in data:
+                        complete_response["cypher_query"] = data.get("cypher_query")
+                    if "results" in data:
+                        complete_response["results"] = data.get("results")
 
                     yield f"{json.dumps(complete_response)}\n"
 
@@ -1046,11 +1086,12 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
         - **Research**: Analyze knowledge graph structure and relationships
 
         **Key Features:**
-        - No LLM generation - pure data retrieval
+        - No natural-language generation for standard retrieval modes
         - Complete structured output with entities, relationships, and chunks
         - Always includes references for citation
         - Detailed metadata about processing and keywords
         - Compatible with all query modes and parameters
+        - Cypher mode still uses the configured LLM to generate a read-only Cypher query before execution
 
         **Query Mode Behaviors:**
         - **local**: Returns entities and their direct relationships + related chunks
@@ -1059,6 +1100,7 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
         - **naive**: Returns only vector-retrieved text chunks (no knowledge graph)
         - **mix**: Integrates knowledge graph data with vector-retrieved chunks
         - **bypass**: Returns empty data arrays (used for direct LLM queries)
+        - **cypher**: Returns generated Cypher and executed Neo4j rows
 
         **Data Structure:**
         - **entities**: Knowledge graph entities with descriptions and metadata

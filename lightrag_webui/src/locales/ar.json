@@ -407,7 +407,8 @@
         "global": "عالمي",
         "hybrid": "مختلط",
         "mix": "مزيج",
-        "bypass": "تجاوز"
+        "bypass": "تجاوز",
+        "cypher": "Cypher"
       },
       "responseFormat": "تنسيق الرد",
       "responseFormatTooltip": "يحدد تنسيق الرد. أمثلة:\n• فقرات متعددة\n• فقرة واحدة\n• نقاط نقطية",

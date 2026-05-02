@@ -13,7 +13,7 @@ import { EraserIcon, SendIcon, CopyIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { copyToClipboard } from '@/utils/clipboard'
-import type { QueryMode } from '@/api/lightrag'
+import type { QueryMode, QueryResponse } from '@/api/lightrag'
 
 // Helper function to generate unique IDs with browser compatibility
 const generateUniqueId = () => {
@@ -101,6 +101,24 @@ const parseCOTContent = (content: string) => {
   }
 }
 
+const formatAssistantResponse = (response: QueryResponse): string => {
+  if (!response.cypher_query && !response.results) {
+    return response.response
+  }
+
+  const sections: string[] = []
+  if (response.response?.trim()) {
+    sections.push(response.response.trim())
+  }
+  if (response.cypher_query) {
+    sections.push(`### Cypher Query\n\n\`\`\`cypher\n${response.cypher_query}\n\`\`\``)
+  }
+  if (response.results) {
+    sections.push(`### Results\n\n\`\`\`json\n${JSON.stringify(response.results, null, 2)}\n\`\`\``)
+  }
+  return sections.join('\n\n')
+}
+
 export default function RetrievalTesting() {
   const { t } = useTranslation()
   // Get current tab to determine if this tab is active (for performance optimization)
@@ -178,7 +196,7 @@ export default function RetrievalTesting() {
       if (!inputValue.trim() || isLoading) return
 
       // Parse query mode prefix
-      const allowedModes: QueryMode[] = ['naive', 'local', 'global', 'hybrid', 'mix', 'bypass']
+      const allowedModes: QueryMode[] = ['naive', 'local', 'global', 'hybrid', 'mix', 'bypass', 'cypher']
       const prefixMatch = inputValue.match(/^\/(\w+)\s+([\s\S]+)/)
       let modeOverride: QueryMode | undefined = undefined
       let actualQuery = inputValue
@@ -195,7 +213,7 @@ export default function RetrievalTesting() {
         if (!allowedModes.includes(mode)) {
           setInputError(
             t('retrievePanel.retrieval.queryModeError', {
-              modes: 'naive, local, global, hybrid, mix, bypass',
+              modes: 'naive, local, global, hybrid, mix, bypass, cypher',
             })
           )
           return
@@ -369,7 +387,9 @@ export default function RetrievalTesting() {
 
       try {
         // Run query
-        if (state.querySettings.stream) {
+        const shouldUseStreaming = state.querySettings.stream && effectiveMode !== 'cypher'
+
+        if (shouldUseStreaming) {
           let errorMessage = ''
           await queryTextStream(queryParams, updateAssistantMessage, (error) => {
             errorMessage += error
@@ -382,7 +402,7 @@ export default function RetrievalTesting() {
           }
         } else {
           const response = await queryText(queryParams)
-          updateAssistantMessage(response.response)
+          updateAssistantMessage(formatAssistantResponse(response))
         }
       } catch (err) {
         // Handle error

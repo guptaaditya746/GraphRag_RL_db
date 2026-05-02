@@ -407,7 +407,8 @@
         "global": "Global",
         "hybrid": "Hybrid",
         "mix": "Mix",
-        "bypass": "Bypass"
+        "bypass": "Bypass",
+        "cypher": "Cypher"
       },
       "responseFormat": "응답 형식",
       "responseFormatTooltip": "응답 형식을 정의합니다. 예:\n• 여러 단락\n• 단일 단락\n• 글머리 기호",

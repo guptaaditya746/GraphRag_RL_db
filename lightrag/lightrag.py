@@ -89,6 +89,7 @@ from lightrag.operate import (
     chunking_by_token_size,
     extract_entities,
     merge_nodes_and_edges,
+    cypher_query,
     kg_query,
     naive_query,
     rebuild_knowledge_from_chunks,
@@ -2762,6 +2763,7 @@ class LightRAG:
             - **mix**: Includes knowledge graph data plus vector-retrieved document chunks
             - **naive**: Only vector-retrieved chunks, entities and relationships arrays are empty
             - **bypass**: All data arrays are empty, used for direct LLM queries
+            - **cypher**: Generated Cypher query results returned from Neo4j
 
             ** processing_info is optional and may not be present in all responses, especially when query result is empty**
 
@@ -2819,6 +2821,21 @@ class LightRAG:
                 self.relationships_vdb,
                 self.text_chunks,
                 data_param,  # Use data_param with only_need_context=True
+                global_config,
+                hashing_kv=self.llm_response_cache,
+                system_prompt=None,
+                chunks_vdb=self.chunks_vdb,
+            )
+        elif data_param.mode == "cypher":
+            logger.debug("[aquery_data] Using cypher mode")
+            data_param.stream = False
+            query_result = await cypher_query(
+                query.strip(),
+                self.chunk_entity_relation_graph,
+                self.entities_vdb,
+                self.relationships_vdb,
+                self.text_chunks,
+                data_param,
                 global_config,
                 hashing_kv=self.llm_response_cache,
                 system_prompt=None,
@@ -2910,6 +2927,20 @@ class LightRAG:
 
             if param.mode in ["local", "global", "hybrid", "mix"]:
                 query_result = await kg_query(
+                    query.strip(),
+                    self.chunk_entity_relation_graph,
+                    self.entities_vdb,
+                    self.relationships_vdb,
+                    self.text_chunks,
+                    param,
+                    global_config,
+                    hashing_kv=self.llm_response_cache,
+                    system_prompt=system_prompt,
+                    chunks_vdb=self.chunks_vdb,
+                )
+            elif param.mode == "cypher":
+                param.stream = False
+                query_result = await cypher_query(
                     query.strip(),
                     self.chunk_entity_relation_graph,
                     self.entities_vdb,

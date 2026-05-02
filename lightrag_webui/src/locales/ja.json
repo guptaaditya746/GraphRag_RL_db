@@ -407,7 +407,8 @@
         "global": "Global",
         "hybrid": "Hybrid",
         "mix": "Mix",
-        "bypass": "Bypass"
+        "bypass": "Bypass",
+        "cypher": "Cypher"
       },
       "responseFormat": "応答形式",
       "responseFormatTooltip": "応答形式を定義します。例:\n• 複数段落\n• 単一段落\n• 箇条書き",

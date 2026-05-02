@@ -407,7 +407,8 @@
         "global": "Global",
         "hybrid": "Hybrid",
         "mix": "Mix",
-        "bypass": "Bypass"
+        "bypass": "Bypass",
+        "cypher": "Cypher"
       },
       "responseFormat": "响应格式",
       "responseFormatTooltip": "定义响应格式。例如：\n• 多段落\n• 单段落\n• 要点",

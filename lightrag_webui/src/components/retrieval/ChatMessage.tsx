@@ -295,6 +295,7 @@ const CodeHighlight = memo(({ inline, className, children, renderAsDiagram = fal
   const [hasRendered, setHasRendered] = useState(false); // State to track successful render
   const match = className?.match(/language-(\w+)/);
   const language = match ? match[1] : undefined;
+  const syntaxLanguage = language === 'cypher' ? 'sql' : language;
   const mermaidRef = useRef<HTMLDivElement>(null);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Use ReturnType for better typing
 
@@ -485,7 +486,7 @@ const CodeHighlight = memo(({ inline, className, children, renderAsDiagram = fal
     <SyntaxHighlighter
       style={theme === 'dark' ? oneDark : oneLight}
       PreTag="div"
-      language={language}
+      language={syntaxLanguage}
       {...props}
     >
       {contentStr}

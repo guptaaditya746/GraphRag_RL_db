@@ -125,7 +125,13 @@ export default function QuerySettings() {
               <div className="flex items-center gap-1">
                 <Select
                   value={querySettings.mode}
-                  onValueChange={(v) => handleChange('mode', v as QueryMode)}
+                  onValueChange={(v) => {
+                    const nextMode = v as QueryMode
+                    handleChange('mode', nextMode)
+                    if (nextMode === 'cypher') {
+                      handleChange('stream', false)
+                    }
+                  }}
                 >
                   <SelectTrigger
                     id="query_mode_select"
@@ -141,6 +147,7 @@ export default function QuerySettings() {
                       <SelectItem value="hybrid">{t('retrievePanel.querySettings.queryModeOptions.hybrid')}</SelectItem>
                       <SelectItem value="mix">{t('retrievePanel.querySettings.queryModeOptions.mix')}</SelectItem>
                       <SelectItem value="bypass">{t('retrievePanel.querySettings.queryModeOptions.bypass')}</SelectItem>
+                      <SelectItem value="cypher">{t('retrievePanel.querySettings.queryModeOptions.cypher')}</SelectItem>
                     </SelectGroup>
                   </SelectContent>
                 </Select>
@@ -443,6 +450,7 @@ export default function QuerySettings() {
                   className="mr-10 cursor-pointer"
                   id="stream"
                   checked={querySettings.stream}
+                  disabled={querySettings.mode === 'cypher'}
                   onCheckedChange={(checked) => handleChange('stream', checked)}
                 />
               </div>

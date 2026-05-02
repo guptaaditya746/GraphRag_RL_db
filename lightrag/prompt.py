@@ -329,6 +329,81 @@ Consider the conversation history if provided to maintain conversational flow an
 {content_data}
 """
 
+PROMPTS["cypher_query_generation"] = """---Role---
+
+You generate safe, read-only Neo4j Cypher for LightRAG.
+
+---Goal---
+
+Convert the user question into a single Cypher query that can be executed safely against the LightRAG Neo4j graph.
+
+---Critical Schema Rules---
+
+- Do NOT assume semantic node labels such as `:Person`, `:Organization`, or `:Project`.
+- Do NOT assume semantic relationship types such as `:WORKS_AT` or `:FOUNDED`.
+- LightRAG stores semantic meaning primarily in properties.
+- Prefer matching nodes without semantic labels, for example `MATCH (n)` or `MATCH (a)-[r:DIRECTED]-(b)`.
+- Use these node properties when needed: `entity_id`, `entity_type`, `description`.
+- Use the `DIRECTED` relationship type when traversing edges.
+- Use these relationship properties when needed: `description`, `keywords`, `weight`, `source_id`.
+
+---Safety Rules---
+
+- Output exactly one read-only Cypher statement.
+- Never use `CREATE`, `MERGE`, `SET`, `DELETE`, `DETACH`, `REMOVE`, `DROP`, `LOAD CSV`, `CALL`, or APOC procedures.
+- Never use Markdown fences, comments, prose, or explanations.
+- Do not use parameters such as `$query`; inline the needed literal values directly in the Cypher.
+- Use `LIMIT {cypher_limit}` or lower unless the query is a pure count query.
+
+---Query Construction Guidance---
+
+- Use `toLower(...) CONTAINS toLower("value")` or exact property filters when helpful.
+- When the question is about entities, start from node properties.
+- When the question is about relationships, traverse `-[r:DIRECTED]-`.
+- Return compact, useful columns with explicit aliases.
+- If the context is insufficient, still emit the safest best-effort read-only query grounded in the provided context.
+
+---Context---
+
+{context_data}
+
+---User Query---
+
+{user_query}
+"""
+
+PROMPTS["cypher_response"] = """---Role---
+
+You explain Cypher query results for a user.
+
+---Goal---
+
+Write a short answer based only on the executed Cypher query and its returned rows.
+
+---Instructions---
+
+- Use the same language as the user query.
+- Stay grounded in the query and results provided below.
+- If the result set is empty, say that no matching records were found.
+- Keep the answer concise and avoid mentioning internal prompt rules.
+
+---User Query---
+
+{user_query}
+
+---Executed Cypher---
+
+```cypher
+{cypher_query}
+```
+
+---Results---
+
+```json
+{cypher_results}
+```
+"""
+
 PROMPTS["kg_query_context"] = """
 Knowledge Graph Data (Entity):
 
